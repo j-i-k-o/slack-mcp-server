@@ -1,0 +1,41 @@
+name: Start next development cycle
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+jobs:
+  create-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version
+        run: |
+          npm version patch --no-git-tag-version
+          echo "NEW_VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "Start developing ${{ env.NEW_VERSION}}"
+          branch: "version-updater/${{ env.NEW_VERSION}}"
+          base: "main"
+          commit-message: "Bump version to ${{ env.NEW_VERSION}}"
+          body: |
+            This PR bumps the version to ${{ env.NEW_VERSION}} to start the next development cycle.
+            
+            Changes:
+            - Updated package.json version from previous version to ${{ env.NEW_VERSION}}
