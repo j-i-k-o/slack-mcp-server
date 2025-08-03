@@ -29,6 +29,12 @@ import {
   SearchMessagesResponseSchema,
   ConversationsHistoryResponseSchema,
   ConversationsRepliesResponseSchema,
+  ListCanvasesRequestSchema,
+  GetCanvasSectionsRequestSchema,
+  EditCanvasRequestSchema,
+  ListCanvasesResponseSchema,
+  GetCanvasSectionsResponseSchema,
+  EditCanvasResponseSchema,
 } from './schemas.js';
 
 dotenv.config();
@@ -149,6 +155,24 @@ function createServer(): Server {
           description:
             'Search for messages with specific criteria/filters. Use this when: 1) You need to find messages from a specific user, 2) You need messages from a specific date range, 3) You need to search by keywords, 4) You want to filter by channel. This tool is optimized for targeted searches. For general channel browsing without filters, use slack_get_channel_history instead.',
           inputSchema: zodToJsonSchema(SearchMessagesRequestSchema),
+        },
+        {
+          name: 'slack_list_canvases',
+          description:
+            'List canvases in the workspace with optional filtering by user or channel',
+          inputSchema: zodToJsonSchema(ListCanvasesRequestSchema),
+        },
+        {
+          name: 'slack_get_canvas_sections',
+          description:
+            'Get sections from a canvas for reading content or identifying sections for editing',
+          inputSchema: zodToJsonSchema(GetCanvasSectionsRequestSchema),
+        },
+        {
+          name: 'slack_edit_canvas',
+          description:
+            'Edit a canvas by inserting, replacing, or deleting content sections',
+          inputSchema: zodToJsonSchema(EditCanvasRequestSchema),
         },
       ],
     };
@@ -378,6 +402,69 @@ function createServer(): Server {
           }
 
           const parsed = SearchMessagesResponseSchema.parse(response);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(parsed) }],
+          };
+        }
+
+        case 'slack_list_canvases': {
+          const args = ListCanvasesRequestSchema.parse(
+            request.params.arguments
+          );
+          const response = await userClient.files.list({
+            types: 'canvas',
+            user: args.user_id,
+            channel: args.channel_id,
+            count: args.count,
+            page: args.page,
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to list canvases: ${response.error}`);
+          }
+          const parsed = ListCanvasesResponseSchema.parse(response);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(parsed) }],
+          };
+        }
+
+        case 'slack_get_canvas_sections': {
+          const args = GetCanvasSectionsRequestSchema.parse(
+            request.params.arguments
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const criteria: any = {};
+          if (args.section_types) {
+            criteria.section_types = args.section_types;
+          }
+          if (args.contains_text) {
+            criteria.contains_text = args.contains_text;
+          }
+
+          const response = await userClient.canvases.sections.lookup({
+            canvas_id: args.canvas_id,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            criteria: criteria as any,
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to get canvas sections: ${response.error}`);
+          }
+          const parsed = GetCanvasSectionsResponseSchema.parse(response);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(parsed) }],
+          };
+        }
+
+        case 'slack_edit_canvas': {
+          const args = EditCanvasRequestSchema.parse(request.params.arguments);
+          const response = await userClient.canvases.edit({
+            canvas_id: args.canvas_id,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            changes: args.changes as any,
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to edit canvas: ${response.error}`);
+          }
+          const parsed = EditCanvasResponseSchema.parse(response);
           return {
             content: [{ type: 'text', text: JSON.stringify(parsed) }],
           };

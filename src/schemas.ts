@@ -95,6 +95,114 @@ const SearchMessageSchema = z
   .strip();
 
 //
+// Canvas schemas
+//
+
+const CanvasDocumentContentSchema = z
+  .object({
+    type: z
+      .literal('markdown')
+      .describe('Content type - currently only markdown is supported'),
+    markdown: z.string().describe('Markdown content for the canvas section'),
+  })
+  .strip();
+
+const CanvasChangeSchema = z
+  .object({
+    operation: z
+      .enum([
+        'insert_after',
+        'insert_before',
+        'insert_at_start',
+        'insert_at_end',
+        'replace',
+        'delete',
+      ])
+      .describe('The type of edit operation to perform'),
+    section_id: z
+      .string()
+      .optional()
+      .describe(
+        'Required for insert_after, insert_before, replace (when targeting specific section), and delete operations'
+      ),
+    document_content: CanvasDocumentContentSchema.optional().describe(
+      'Required for insert_after, insert_before, insert_at_start, insert_at_end, and replace operations'
+    ),
+  })
+  .strip()
+  .refine(
+    (data) => {
+      const operationsRequiringContent = [
+        'insert_after',
+        'insert_before',
+        'insert_at_start',
+        'insert_at_end',
+        'replace',
+      ];
+      const operationsRequiringSectionId = [
+        'insert_after',
+        'insert_before',
+        'delete',
+      ];
+
+      if (
+        operationsRequiringContent.includes(data.operation) &&
+        !data.document_content
+      ) {
+        return false;
+      }
+      if (
+        operationsRequiringSectionId.includes(data.operation) &&
+        !data.section_id
+      ) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'Invalid operation parameters: insert/replace operations require document_content, insert_after/insert_before/delete require section_id',
+    }
+  );
+
+const CanvasFileSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+    title: z.string().optional(),
+    created: z.number().optional(),
+    timestamp: z.number().optional(),
+    size: z.number().optional(),
+    user: z.string().optional(),
+    is_public: z.boolean().optional(),
+    public_url_shared: z.boolean().optional(),
+    display_as_bot: z.boolean().optional(),
+    username: z.string().optional(),
+    url_private: z.string().optional(),
+    url_private_download: z.string().optional(),
+    permalink: z.string().optional(),
+    permalink_public: z.string().optional(),
+    edit_link: z.string().optional(),
+    preview: z.string().optional(),
+    plain_text: z.string().optional(),
+    preview_highlight: z.string().optional(),
+    lines: z.number().optional(),
+    lines_more: z.number().optional(),
+    preview_is_truncated: z.boolean().optional(),
+    is_starred: z.boolean().optional(),
+    has_rich_preview: z.boolean().optional(),
+  })
+  .strip();
+
+const CanvasSectionSchema = z
+  .object({
+    id: z.string().optional(),
+    type: z.string().optional(),
+    content: z.string().optional(),
+  })
+  .strip();
+
+//
 // Request schemas
 //
 
@@ -320,6 +428,55 @@ export const SearchMessagesRequestSchema = z.object({
     .describe('Page number of results (max 100)'),
 });
 
+export const ListCanvasesRequestSchema = z.object({
+  user_id: z
+    .string()
+    .optional()
+    .describe('User ID to filter canvases by owner'),
+  channel_id: z
+    .string()
+    .optional()
+    .describe('Channel ID to filter canvases by channel'),
+  count: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .default(100)
+    .describe('Number of items to return per page (default 100)'),
+  page: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(1)
+    .describe('Page number to fetch (default 1)'),
+});
+
+export const GetCanvasSectionsRequestSchema = z.object({
+  canvas_id: z
+    .string()
+    .describe('The encoded ID of the canvas to lookup sections for'),
+  section_types: z
+    .array(z.enum(['h1', 'h2', 'h3', 'any_header']))
+    .optional()
+    .describe('Array of section types to filter by (e.g., ["h1", "h2"])'),
+  contains_text: z
+    .string()
+    .optional()
+    .describe('Search for sections containing specific text'),
+});
+
+export const EditCanvasRequestSchema = z.object({
+  canvas_id: z.string().describe('The encoded ID of the canvas to edit'),
+  changes: z
+    .array(CanvasChangeSchema)
+    .min(1)
+    .max(100)
+    .describe('Array of edit operations to perform on the canvas (max 100)'),
+});
+
 const SearchPaginationSchema = z.object({
   first: z.number().optional(),
   last: z.number().optional(),
@@ -382,4 +539,24 @@ export const SearchMessagesResponseSchema = BaseResponseSchema.extend({
       pagination: SearchPaginationSchema.optional(),
     })
     .optional(),
+});
+
+export const ListCanvasesResponseSchema = BaseResponseSchema.extend({
+  files: z.array(CanvasFileSchema).optional(),
+  paging: z
+    .object({
+      count: z.number().optional(),
+      total: z.number().optional(),
+      page: z.number().optional(),
+      pages: z.number().optional(),
+    })
+    .optional(),
+});
+
+export const GetCanvasSectionsResponseSchema = BaseResponseSchema.extend({
+  sections: z.array(CanvasSectionSchema).optional(),
+});
+
+export const EditCanvasResponseSchema = BaseResponseSchema.extend({
+  canvas_id: z.string().optional(),
 });
