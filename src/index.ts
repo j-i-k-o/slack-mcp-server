@@ -431,8 +431,12 @@ function createServer(): Server {
           const args = GetCanvasSectionsRequestSchema.parse(
             request.params.arguments
           );
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const criteria: any = {};
+
+          const criteria: {
+            section_types?: ('h1' | 'h2' | 'h3' | 'any_header')[];
+            contains_text?: string;
+          } = {};
+
           if (args.section_types) {
             criteria.section_types = args.section_types;
           }
@@ -456,10 +460,22 @@ function createServer(): Server {
 
         case 'slack_edit_canvas': {
           const args = EditCanvasRequestSchema.parse(request.params.arguments);
+
+          const changes = args.changes.map((change) => ({
+            operation: change.operation,
+            ...(change.section_id && { section_id: change.section_id }),
+            ...(change.document_content && {
+              document_content: {
+                type: change.document_content.type,
+                markdown: change.document_content.markdown,
+              },
+            }),
+          }));
+
           const response = await userClient.canvases.edit({
             canvas_id: args.canvas_id,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            changes: args.changes as any,
+            changes: changes as any,
           });
           if (!response.ok) {
             throw new Error(`Failed to edit canvas: ${response.error}`);

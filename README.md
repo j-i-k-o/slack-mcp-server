@@ -32,6 +32,26 @@ Available tools:
   - Content filters: `has` (emoji reactions), `is` (saved/thread)
   - Sorting options by relevance score or timestamp
 
+### Canvas Tools
+
+- `slack_list_canvases` - List canvases in the workspace with optional filtering:
+  - Filter by user ID or channel ID
+  - Pagination support with configurable page size
+  - Returns canvas metadata including ID, name, creation date, and URLs
+
+- `slack_get_canvas_sections` - Get sections from a canvas for reading content or identifying sections for editing:
+  - Filter by section types: `h1`, `h2`, `h3`, or `any_header`
+  - Search for sections containing specific text
+  - Returns section IDs and metadata for targeted operations
+  - **Note**: At least one of `section_types` or `contains_text` must be provided
+
+- `slack_edit_canvas` - Edit canvas content with multiple operation types:
+  - **Insert operations**: `insert_after`, `insert_before`, `insert_at_start`, `insert_at_end`
+  - **Modify operations**: `replace` (entire canvas or specific section)
+  - **Remove operations**: `delete` (specific section)
+  - Supports markdown content with rich formatting
+  - Batch operations: Apply multiple changes in a single request
+
 ## Quick Start
 
 ### Installation
