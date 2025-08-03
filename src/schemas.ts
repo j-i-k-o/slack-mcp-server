@@ -458,11 +458,13 @@ export const GetCanvasSectionsRequestSchema = z
   .object({
     canvas_id: z
       .string()
-      .describe('The encoded ID of the canvas to lookup sections for'),
+      .describe('The encoded ID of the canvas to lookup sections for. At least one of section_types or contains_text must be provided.'),
     section_types: z
       .array(z.enum(['h1', 'h2', 'h3', 'any_header']))
+      .min(1)
+      .max(3)
       .optional()
-      .describe('Array of section types to filter by (e.g., ["h1", "h2"])'),
+      .describe('Array of section types to filter by (e.g., ["h1", "h2"]). Use ["any_header"] to get all sections regardless of type. Minimum 1, maximum 3 items.'),
     contains_text: z
       .string()
       .optional()
