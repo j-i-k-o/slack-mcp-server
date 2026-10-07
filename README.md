@@ -105,7 +105,7 @@ Because only the user token is used, add scopes under **User Token Scopes** (not
 | Upload files | `files:write` |
 | Canvases | `canvases:read`, `canvases:write` (listing also needs `files:read`) |
 
-`slack_list_channels` lists public and private channels together, so it needs both `channels:read` and `groups:read`.
+`slack_list_channels` lists public and private channels together. Without `groups:read`, it falls back to public channels only.
 
 ### Usage
 

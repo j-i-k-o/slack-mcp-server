@@ -136,7 +136,7 @@ function createServer(): Server {
         {
           name: 'slack_list_channels',
           description:
-            'List public channels and the private channels the user is a member of, with pagination. Listing private channels requires the groups:read scope.',
+            'List public channels and the private channels the user is a member of, with pagination. Private channels are included only when the token has the groups:read scope.',
           inputSchema: zodToJsonSchema(ListChannelsRequestSchema),
         },
         {
@@ -226,10 +226,20 @@ function createServer(): Server {
           const args = ListChannelsRequestSchema.parse(
             request.params.arguments
           );
-          const response = await userClient.conversations.list({
-            limit: args.limit,
-            cursor: args.cursor,
-            types: 'public_channel,private_channel',
+          const listChannels = (types: string) =>
+            userClient.conversations.list({
+              limit: args.limit,
+              cursor: args.cursor,
+              types,
+            });
+          // Fall back to public channels only when the token lacks groups:read
+          const response = await listChannels(
+            'public_channel,private_channel'
+          ).catch((error) => {
+            if (error?.data?.error === 'missing_scope') {
+              return listChannels('public_channel');
+            }
+            throw error;
           });
           if (!response.ok) {
             throw new Error(`Failed to list channels: ${response.error}`);
