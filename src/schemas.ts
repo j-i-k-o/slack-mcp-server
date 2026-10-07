@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 
 //
@@ -41,8 +42,23 @@ const ReactionSchema = z
   })
   .strip();
 
+const FileSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+    title: z.string().optional(),
+    mimetype: z.string().optional(),
+    filetype: z.string().optional(),
+    size: z.number().optional(),
+    url_private: z.string().optional(),
+    url_private_download: z.string().optional(),
+    permalink: z.string().optional(),
+  })
+  .strip();
+
 const ConversationsHistoryMessageSchema = z
   .object({
+    files: z.array(FileSchema).optional(),
     reactions: z.array(ReactionSchema).optional(),
     reply_count: z.number().optional(),
     reply_users: z.array(z.string()).optional(),
@@ -86,11 +102,13 @@ const SearchMessageSchema = z
         name: z.string().optional(),
       })
       .optional(),
+    files: z.array(FileSchema).optional(),
     permalink: z.string().url().optional(),
     text: z.string().optional(),
     ts: z.string().optional(),
     type: z.string().optional(),
-    user: z.string().optional(),
+    // Bot posts in search results have user: null
+    user: z.string().nullable().optional(),
   })
   .strip();
 
@@ -493,6 +511,68 @@ export const EditCanvasRequestSchema = z.object({
     .describe('Array of edit operations to perform on the canvas (max 100)'),
 });
 
+export const DownloadFileRequestSchema = z.object({
+  file_id: z
+    .string()
+    .regex(/^F[A-Z0-9]+$/, {
+      message: 'Must be a valid Slack file ID (e.g., "F1234567")',
+    })
+    .describe(
+      'The ID of the file to download (e.g., "F1234567"). File IDs are in the files field of messages returned by slack_get_channel_history, slack_get_thread_replies and slack_search_messages.'
+    ),
+  output_dir: z
+    .string()
+    .refine((dir) => isAbsolute(dir), {
+      message: 'output_dir must be an absolute path',
+    })
+    .optional()
+    .describe(
+      'Absolute path of the directory to save the file in (default: SLACK_DOWNLOAD_DIR, or slack-mcp-server in the OS temp directory)'
+    ),
+});
+
+export const UploadFileRequestSchema = z
+  .object({
+    file_path: z
+      .string()
+      .refine((filePath) => isAbsolute(filePath), {
+        message: 'file_path must be an absolute path',
+      })
+      .describe('Absolute path of the local file to upload'),
+    channel_id: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the channel to share the file in. If omitted, the file is uploaded privately and not shared anywhere.'
+      ),
+    thread_ts: z
+      .string()
+      .regex(/^\d{10}\.\d{6}$/, {
+        message: "Timestamp must be in the format '1234567890.123456'",
+      })
+      .optional()
+      .describe(
+        "The timestamp of the parent message in the format '1234567890.123456', to share the file as a thread reply. Requires channel_id."
+      ),
+    initial_comment: z
+      .string()
+      .optional()
+      .describe('Message text to post with the file. Requires channel_id.'),
+    title: z.string().optional().describe('Title of the file'),
+    filename: z
+      .string()
+      .optional()
+      .describe(
+        'File name shown in Slack (default: the base name of file_path)'
+      ),
+  })
+  .refine(
+    (data) => data.channel_id || (!data.thread_ts && !data.initial_comment),
+    {
+      message: 'thread_ts and initial_comment require channel_id',
+    }
+  );
+
 const SearchPaginationSchema = z.object({
   first: z.number().optional(),
   last: z.number().optional(),
@@ -575,4 +655,19 @@ export const GetCanvasSectionsResponseSchema = BaseResponseSchema.extend({
 
 export const EditCanvasResponseSchema = BaseResponseSchema.extend({
   canvas_id: z.string().optional(),
+});
+
+export const FileInfoResponseSchema = BaseResponseSchema.extend({
+  file: FileSchema.optional(),
+});
+
+// files.uploadV2 returns one files.completeUploadExternal response per upload
+export const UploadFileResponseSchema = BaseResponseSchema.extend({
+  files: z
+    .array(
+      BaseResponseSchema.extend({
+        files: z.array(FileSchema).optional(),
+      })
+    )
+    .optional(),
 });

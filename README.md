@@ -16,7 +16,7 @@ This server supports both traditional and modern MCP transport methods:
 
 Available tools:
 
-- `slack_list_channels` - List public channels in the workspace with pagination
+- `slack_list_channels` - List public channels and the private channels you are a member of, with pagination
 - `slack_post_message` - Post a new message to a Slack channel
 - `slack_reply_to_thread` - Reply to a specific message thread in Slack
 - `slack_add_reaction` - Add a reaction emoji to a message
@@ -52,6 +52,17 @@ Available tools:
   - Supports markdown content with rich formatting
   - Batch operations: Apply multiple changes in a single request
 
+### File Tools
+
+- `slack_download_file` - Download a file shared in Slack to a local directory:
+  - File IDs are in the `files` field of messages returned by `slack_get_channel_history`, `slack_get_thread_replies` and `slack_search_messages`
+  - Saves to `output_dir`, `SLACK_DOWNLOAD_DIR`, or `slack-mcp-server` in the OS temp directory (in that order) and returns the saved path
+  - External files (e.g. Google Drive) cannot be downloaded
+
+- `slack_upload_file` - Upload a local file to Slack:
+  - Shares the file in `channel_id` (as a thread reply with `thread_ts`) with an optional `initial_comment`
+  - Without `channel_id`, the file is uploaded privately and not shared anywhere
+
 ## Quick Start
 
 ### Installation
@@ -77,6 +88,24 @@ SLACK_USER_TOKEN=xoxp-your-user-token  # Required for all operations
 ```
 
 **Important**: All operations now use the User OAuth Token (`SLACK_USER_TOKEN`) instead of the Bot Token. This provides broader access to Slack APIs and ensures consistent functionality across all tools.
+
+#### Required User Token Scopes
+
+Because only the user token is used, add scopes under **User Token Scopes** (not Bot Token Scopes) in your Slack app's OAuth & Permissions page, then reinstall the app.
+
+| Feature | User Token Scopes |
+| --- | --- |
+| Public channels (list, history, threads, `in_channel` search filter) | `channels:read`, `channels:history` |
+| Private channels you are a member of (list, history, threads, `in_channel` search filter) | `groups:read`, `groups:history` |
+| Post messages and thread replies | `chat:write` |
+| Add reactions | `reactions:write` |
+| Users and profiles | `users:read`, `users.profile:read` |
+| Search messages | `search:read` |
+| Download files | `files:read` |
+| Upload files | `files:write` |
+| Canvases | `canvases:read`, `canvases:write` (listing also needs `files:read`) |
+
+`slack_list_channels` lists public and private channels together. Without `groups:read`, it falls back to public channels only.
 
 ### Usage
 

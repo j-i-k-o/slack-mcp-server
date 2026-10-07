@@ -12,6 +12,9 @@ import { WebClient } from '@slack/web-api';
 import dotenv from 'dotenv';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, extname, join } from 'node:path';
 import {
   ListChannelsRequestSchema,
   PostMessageRequestSchema,
@@ -35,6 +38,10 @@ import {
   ListCanvasesResponseSchema,
   GetCanvasSectionsResponseSchema,
   EditCanvasResponseSchema,
+  DownloadFileRequestSchema,
+  UploadFileRequestSchema,
+  FileInfoResponseSchema,
+  UploadFileResponseSchema,
 } from './schemas.js';
 
 dotenv.config();
@@ -54,6 +61,24 @@ if (!process.env.SLACK_USER_TOKEN) {
 }
 
 const userClient = new WebClient(process.env.SLACK_USER_TOKEN);
+
+// Make a Slack file name safe to use as a local file name
+function sanitizeFileName(name: string): string {
+  const base = basename(name)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\\x00-\x1f\x7f]/g, '_')
+    .replace(/^\.+/, '_');
+  // File systems limit names to 255 bytes, so truncate by bytes and keep the extension
+  const ext = Buffer.byteLength(extname(base)) <= 20 ? extname(base) : '';
+  let stem = '';
+  for (const char of base.slice(0, base.length - ext.length)) {
+    if (Buffer.byteLength(stem + char + ext) > 200) {
+      break;
+    }
+    stem += char;
+  }
+  return stem + ext;
+}
 
 // Parse command line arguments
 function parseArguments() {
@@ -110,7 +135,8 @@ function createServer(): Server {
       tools: [
         {
           name: 'slack_list_channels',
-          description: 'List public channels in the workspace with pagination',
+          description:
+            'List public channels and the private channels the user is a member of, with pagination. Private channels are included only when the token has the groups:read scope.',
           inputSchema: zodToJsonSchema(ListChannelsRequestSchema),
         },
         {
@@ -174,6 +200,18 @@ function createServer(): Server {
             'Edit a canvas by inserting, replacing, or deleting content sections',
           inputSchema: zodToJsonSchema(EditCanvasRequestSchema),
         },
+        {
+          name: 'slack_download_file',
+          description:
+            'Download a file shared in Slack to a local directory and return the saved path with the file metadata. Requires the files:read scope.',
+          inputSchema: zodToJsonSchema(DownloadFileRequestSchema),
+        },
+        {
+          name: 'slack_upload_file',
+          description:
+            'Upload a local file to Slack. With channel_id, the file is shared in that channel (as a thread reply if thread_ts is set) with an optional initial_comment. Without channel_id, the file is uploaded privately and not shared anywhere. Requires the files:write scope.',
+          inputSchema: zodToJsonSchema(UploadFileRequestSchema),
+        },
       ],
     };
   });
@@ -188,10 +226,20 @@ function createServer(): Server {
           const args = ListChannelsRequestSchema.parse(
             request.params.arguments
           );
-          const response = await userClient.conversations.list({
-            limit: args.limit,
-            cursor: args.cursor,
-            types: 'public_channel', // Only public channels
+          const listChannels = (types: string) =>
+            userClient.conversations.list({
+              limit: args.limit,
+              cursor: args.cursor,
+              types,
+            });
+          // Fall back to public channels only when the token lacks groups:read
+          const response = await listChannels(
+            'public_channel,private_channel'
+          ).catch((error) => {
+            if (error?.data?.error === 'missing_scope') {
+              return listChannels('public_channel');
+            }
+            throw error;
           });
           if (!response.ok) {
             throw new Error(`Failed to list channels: ${response.error}`);
@@ -483,6 +531,119 @@ function createServer(): Server {
           const parsed = EditCanvasResponseSchema.parse(response);
           return {
             content: [{ type: 'text', text: JSON.stringify(parsed) }],
+          };
+        }
+
+        case 'slack_download_file': {
+          const args = DownloadFileRequestSchema.parse(
+            request.params.arguments
+          );
+          const response = await userClient.files.info({ file: args.file_id });
+          if (!response.ok) {
+            throw new Error(`Failed to get file info: ${response.error}`);
+          }
+          const { file } = FileInfoResponseSchema.parse(response);
+          const url = file?.url_private_download ?? file?.url_private;
+          if (!file || !url) {
+            throw new Error(
+              `File ${args.file_id} has no download URL (external files such as Google Drive cannot be downloaded)`
+            );
+          }
+
+          // Never send the token outside Slack
+          const { protocol, hostname } = new URL(url);
+          if (
+            protocol !== 'https:' ||
+            !(hostname === 'slack.com' || hostname.endsWith('.slack.com'))
+          ) {
+            throw new Error(`Refusing to download from non-Slack URL: ${url}`);
+          }
+          const download = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${process.env.SLACK_USER_TOKEN}`,
+            },
+          });
+          if (!download.ok) {
+            throw new Error(
+              `Failed to download file: ${download.status} ${download.statusText}`
+            );
+          }
+          // Slack answers with its login page when the token cannot read the file
+          const contentType = download.headers.get('content-type') ?? '';
+          if (
+            contentType.startsWith('text/html') &&
+            file.mimetype !== 'text/html'
+          ) {
+            throw new Error(
+              'Slack returned an HTML page instead of the file. Check that the token has the files:read scope and access to the file.'
+            );
+          }
+          const data = Buffer.from(await download.arrayBuffer());
+
+          const outputDir =
+            args.output_dir ??
+            process.env.SLACK_DOWNLOAD_DIR ??
+            join(tmpdir(), 'slack-mcp-server');
+          await mkdir(outputDir, { recursive: true });
+          const fileName = sanitizeFileName(file.name ?? '');
+          const savedPath = join(
+            outputDir,
+            fileName ? `${args.file_id}_${fileName}` : args.file_id
+          );
+          await writeFile(savedPath, data);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  file: {
+                    id: file.id,
+                    name: file.name,
+                    title: file.title,
+                    mimetype: file.mimetype,
+                    filetype: file.filetype,
+                    size: file.size,
+                    permalink: file.permalink,
+                  },
+                  saved_path: savedPath,
+                  bytes: data.length,
+                }),
+              },
+            ],
+          };
+        }
+
+        case 'slack_upload_file': {
+          const args = UploadFileRequestSchema.parse(request.params.arguments);
+          const fileStat = await stat(args.file_path).catch(() => undefined);
+          if (!fileStat?.isFile()) {
+            throw new Error(`File not found: ${args.file_path}`);
+          }
+
+          const response = await userClient.files.uploadV2({
+            file: args.file_path,
+            filename: args.filename ?? basename(args.file_path),
+            title: args.title,
+            initial_comment: args.initial_comment,
+            ...(args.channel_id && args.thread_ts
+              ? { channel_id: args.channel_id, thread_ts: args.thread_ts }
+              : { channel_id: args.channel_id }),
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to upload file: ${response.error}`);
+          }
+          const parsed = UploadFileResponseSchema.parse(response);
+          const files = (parsed.files ?? []).flatMap((completion) =>
+            (completion.files ?? []).map((uploaded) => ({
+              id: uploaded.id,
+              name: uploaded.name,
+              title: uploaded.title,
+              permalink: uploaded.permalink,
+            }))
+          );
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ files }) }],
           };
         }
 
