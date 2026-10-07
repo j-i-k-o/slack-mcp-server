@@ -107,7 +107,8 @@ const SearchMessageSchema = z
     text: z.string().optional(),
     ts: z.string().optional(),
     type: z.string().optional(),
-    user: z.string().optional(),
+    // Bot posts in search results have user: null
+    user: z.string().nullable().optional(),
   })
   .strip();
 
